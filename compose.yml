@@ -1,0 +1,29 @@
+services:
+  neo4j:
+    image: docker.io/neo4j:5.15-community
+    container_name: logistics_neo4j
+    hostname: logistics_neo4j
+    ports:
+      - "7474:7474" # HTTP (Browser)
+      - "7687:7687" # Bolt (Conexión desde Python/Drivers)
+    environment:
+      # Autenticación básica (Usuario: neo4j / Contraseña: password123)
+      - NEO4J_AUTH=neo4j/password123
+      # Habilitar plugins requeridos por el PDF (APOC y GDS)
+      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
+      # Configuraciones de seguridad para permitir que APOC y GDS corran sin restricciones
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*,gds.*
+      # Memoria inicial y máxima (ajusta según tu PC, 1G/2G suele bastar para proyectos académicos)
+      - NEO4J_server_memory_heap_initial__size=1G
+      - NEO4J_server_memory_heap_max__size=2G
+    volumes:
+      # Persistencia de datos (usando volúmenes nombrados para evitar problemas de permisos en Podman)
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_plugins:

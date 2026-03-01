@@ -1,0 +1,246 @@
+/* assets/style.css - Versión mejorada */
+
+/* Fondo general */
+.stApp {
+    background-color: #f8f9fa;
+}
+
+/* Tarjetas de métricas */
+.metric-card {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    transition:
+        transform 0.2s,
+        box-shadow 0.2s;
+    border-left: 4px solid #2e86ab;
+}
+
+.metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Estilo para el mapa */
+.js-plotly-plot {
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+    background: white;
+    padding: 10px;
+}
+
+/* Leyenda de ruta destacada */
+.ruta-destacada {
+    border-left: 5px solid #ff4b4b;
+    background: linear-gradient(90deg, #fff5f5 0%, white 100%);
+    padding: 15px;
+    margin: 15px 0;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(255, 75, 75, 0.1);
+    font-weight: 500;
+}
+
+/* Badges para origen/destino */
+.nodo-origen {
+    background: linear-gradient(135deg, #2ecc71, #27ae60);
+    color: white;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.9em;
+    display: inline-block;
+    box-shadow: 0 2px 4px rgba(46, 204, 113, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.nodo-destino {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    color: white;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.9em;
+    display: inline-block;
+    box-shadow: 0 2px 4px rgba(231, 76, 60, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Mejoras para los expanders */
+.streamlit-expanderHeader {
+    background-color: white;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+    font-weight: 600;
+    color: #2e86ab;
+}
+
+.streamlit-expanderHeader:hover {
+    background-color: #f8f9fa;
+}
+
+/* Estilo para los tabs */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 8px;
+    background-color: white;
+    padding: 10px;
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+.stTabs [data-baseweb="tab"] {
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-weight: 500;
+}
+
+.stTabs [aria-selected="true"] {
+    background-color: #2e86ab;
+    color: white !important;
+}
+
+/* Botones */
+.stButton > button {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #2e86ab, #1e5f7a);
+    color: white;
+}
+
+/* Selectboxes y sliders */
+.stSelectbox,
+.stSlider {
+    background-color: white;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+}
+
+/* DataFrames */
+.stDataFrame {
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #e9ecef;
+}
+
+/* Tooltips personalizados */
+.tooltip-custom {
+    position: relative;
+    display: inline-block;
+}
+
+.tooltip-custom:hover {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Animaciones */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.main > div {
+    animation: fadeIn 0.3s ease-out;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .metric-card {
+        margin-bottom: 10px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        padding: 4px 8px;
+        font-size: 0.8em;
+    }
+}
+
+/* Scrollbar personalizado */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #2e86ab;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #1e5f7a;
+}
+
+/* Mensajes de éxito/error */
+.stAlert {
+    border-radius: 8px;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.stSuccess {
+    background: linear-gradient(135deg, #d4edda, #c3e6cb);
+    color: #155724;
+}
+
+.stError {
+    background: linear-gradient(135deg, #f8d7da, #f5c6cb);
+    color: #721c24;
+}
+
+/* Información de ruta */
+.ruta-info {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    border-left: 4px solid #2e86ab;
+    margin: 10px 0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+/* Badges para tipos de nodo */
+.badge-almacen {
+    background: #ff4b4b;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+}
+
+.badge-entrega {
+    background: #2ecc71;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+}
+
+.badge-interseccion {
+    background: #f39c12;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+}
