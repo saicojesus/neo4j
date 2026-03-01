@@ -4,50 +4,54 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
+# --- MODIFICADO: La función ahora no muestra nada, solo calcula y devuelve los datos ---
 def ejecutar_algoritmos(conn, origen_id, destino_id, algoritmo, capacidad):
-    """Ejecuta los algoritmos de ruteo seleccionados"""
+    """Ejecuta los algoritmos de ruteo seleccionados y devuelve los resultados."""
 
-    # Crear proyección del grafo con todas las propiedades necesarias
     if not crear_proyeccion(conn):
         st.error("No se pudo crear la proyección del grafo")
-        return None
+        return None, None
 
-    resultado = None
+    ruta_para_mapa = None
+    resultados_para_display = {}
 
     try:
         if algoritmo == "Dijkstra (Distancia)":
-            resultado = ejecutar_dijkstra(conn, origen_id, destino_id)
-            mostrar_resultado_dijkstra(resultado)
+            res_dijkstra = ejecutar_dijkstra(conn, origen_id, destino_id)
+            resultados_para_display["dijkstra"] = res_dijkstra
+            ruta_para_mapa = res_dijkstra
 
         elif algoritmo == "A* (Tiempo + Tráfico)":
-            resultado = ejecutar_astar(conn, origen_id, destino_id)
-            mostrar_resultado_astar(resultado)
+            res_astar = ejecutar_astar(conn, origen_id, destino_id)
+            resultados_para_display["astar"] = res_astar
+            ruta_para_mapa = res_astar
 
         else:  # Comparar ambos
-            resultado_dijkstra = ejecutar_dijkstra(conn, origen_id, destino_id)
-            resultado_astar = ejecutar_astar(conn, origen_id, destino_id)
-            mostrar_comparacion(resultado_dijkstra, resultado_astar)
+            res_dijkstra = ejecutar_dijkstra(conn, origen_id, destino_id)
+            res_astar = ejecutar_astar(conn, origen_id, destino_id)
+            resultados_para_display["dijkstra"] = res_dijkstra
+            resultados_para_display["astar"] = res_astar
 
-            # Para comparación, mostramos el que tenga mejor métrica
-            if resultado_dijkstra and resultado_astar:
-                # Elegir el mejor según distancia (podrías cambiar criterio)
+            # Lógica para decidir qué ruta resaltar en el mapa (sin cambios)
+            if res_dijkstra and res_astar:
                 if (
-                    resultado_dijkstra["distancia_total"]
-                    < resultado_astar.get("tiempo_total", float("inf")) / 1.2
+                    res_dijkstra["distancia_total"]
+                    < res_astar.get("tiempo_total", float("inf")) / 1.2
                 ):
-                    resultado = resultado_dijkstra
+                    ruta_para_mapa = res_dijkstra
                 else:
-                    resultado = resultado_astar
-            elif resultado_dijkstra:
-                resultado = resultado_dijkstra
-            elif resultado_astar:
-                resultado = resultado_astar
+                    ruta_para_mapa = res_astar
+            elif res_dijkstra:
+                ruta_para_mapa = res_dijkstra
+            elif res_astar:
+                ruta_para_mapa = res_astar
 
     finally:
         # Limpiar proyección
         limpiar_proyeccion(conn)
 
-    return resultado
+    # Devuelve la ruta para pintar en el mapa y todos los datos para mostrar en la UI
+    return ruta_para_mapa, resultados_para_display
 
 
 def crear_proyeccion(conn):
@@ -59,23 +63,14 @@ def crear_proyeccion(conn):
         except:
             pass  # Ignorar si no existe
 
-        # Crear nueva proyección con todas las propiedades de nodos y relaciones
+        # Crear nueva proyección
         conn.query("""
             CALL gds.graph.project(
                 'myGraph',
                 {
-                    Almacen: {
-                        label: 'Almacen',
-                        properties: ['x', 'y']
-                    },
-                    Interseccion: {
-                        label: 'Interseccion',
-                        properties: ['x', 'y']
-                    },
-                    PuntoEntrega: {
-                        label: 'PuntoEntrega',
-                        properties: ['x', 'y']
-                    }
+                    Almacen: { label: 'Almacen', properties: ['x', 'y'] },
+                    Interseccion: { label: 'Interseccion', properties: ['x', 'y'] },
+                    PuntoEntrega: { label: 'PuntoEntrega', properties: ['x', 'y'] }
                 },
                 {
                     CONECTA_A: {
@@ -92,7 +87,10 @@ def crear_proyeccion(conn):
 
 
 def ejecutar_dijkstra(conn, origen_id, destino_id):
-    """Ejecuta algoritmo de Dijkstra"""
+    """
+    Ejecuta Dijkstra para encontrar la ruta más CORTA en distancia
+    y ADEMÁS calcula el tiempo REAL de esa ruta.
+    """
     query = """
     MATCH (source {id: $origen}), (target {id: $destino})
     CALL gds.shortestPath.dijkstra.stream('myGraph', {
@@ -102,7 +100,14 @@ def ejecutar_dijkstra(conn, origen_id, destino_id):
     })
     YIELD index, sourceNode, targetNode, totalCost, nodeIds, costs, path
     RETURN
+        // 1. La distancia total (basada en 'peso_distancia')
         totalCost as distancia_total,
+
+        // 2. <-- NUEVA LÍNEA: Calculamos el tiempo real de la ruta encontrada
+        // Usamos REDUCE para sumar el 'peso_tiempo' de cada relación en el camino
+        REDUCE(tiempoTotal = 0.0, rel IN relationships(path) | tiempoTotal + rel.peso_tiempo) AS tiempo_real_total,
+
+        // 3. El resto de los datos que ya tenías
         [nodeId IN nodeIds | gds.util.asNode(nodeId).id] as ruta_nodos,
         [nodeId IN nodeIds | gds.util.asNode(nodeId).nombre] as ruta_nombres,
         [nodeId IN nodeIds | gds.util.asNode(nodeId).x] as coordenadas_x,
@@ -119,13 +124,11 @@ def ejecutar_dijkstra(conn, origen_id, destino_id):
 
 def ejecutar_astar(conn, origen_id, destino_id):
     """Ejecuta algoritmo A*"""
-    # Primero verificamos que los nodos tengan coordenadas
     check_query = """
     MATCH (source {id: $origen}), (target {id: $destino})
     RETURN source.x IS NOT NULL AND source.y IS NOT NULL AS source_ok,
            target.x IS NOT NULL AND target.y IS NOT NULL AS target_ok
     """
-
     try:
         check = conn.query(check_query, {"origen": origen_id, "destino": destino_id})
         if check and check[0]:
@@ -153,7 +156,6 @@ def ejecutar_astar(conn, origen_id, destino_id):
         [nodeId IN nodeIds | gds.util.asNode(nodeId).id] as ruta_nodos,
         [nodeId IN nodeIds | gds.util.asNode(nodeId).nombre] as ruta_nombres
     """
-
     try:
         result = conn.query(query, {"origen": origen_id, "destino": destino_id})
         return result[0] if result else None
@@ -171,27 +173,56 @@ def limpiar_proyeccion(conn):
 
 
 def mostrar_resultado_dijkstra(resultado):
-    """Muestra resultado de Dijkstra"""
+    """Muestra resultado de Dijkstra usando el tiempo real calculado."""
     if not resultado:
         st.warning("No se encontró una ruta con Dijkstra")
         return
 
-    with st.container():
-        st.subheader("📊 Resultado Dijkstra (Basado en Distancia)")
+    st.subheader("📊 Resultado Dijkstra (Ruta más corta por Distancia)")
 
-        col1, col2 = st.columns([1, 2])
+    cols = st.columns(4)
 
-        with col1:
-            st.metric("Distancia Total", f"{resultado['distancia_total']:.2f} km")
+    with cols[0]:
+        st.metric("📏 Distancia Total", f"{resultado['distancia_total']:.2f} km")
 
-        with col2:
-            st.metric("Cantidad de Paradas", len(resultado["ruta_nodos"]))
+    with cols[1]:
+        st.metric("📍 Paradas", len(resultado["ruta_nodos"]))
 
-        st.write("**Secuencia de la Ruta:**")
-        for i, (nombre, nodo_id) in enumerate(
-            zip(resultado["ruta_nombres"], resultado["ruta_nodos"])
-        ):
-            st.write(f"{i + 1}. **{nombre}** ({nodo_id})")
+    # --- MODIFICADO: Usar el tiempo real para calcular la velocidad promedio ---
+    # Esto dará una velocidad mucho más realista
+    with cols[2]:
+        tiempo_en_horas = resultado["tiempo_real_total"] / 60
+        velocidad = (
+            resultado["distancia_total"]
+            / max(tiempo_en_horas, 0.01)  # Evitar división por cero
+        )
+        st.metric("⚡ Velocidad Promedio", f"{velocidad:.1f} km/h")
+
+    # --- MODIFICADO: Mostrar el tiempo real en lugar del estimado ---
+    with cols[3]:
+        # Ya no hacemos: tiempo_est = resultado["distancia_total"] * 1.2
+        # Ahora usamos el valor real de la consulta:
+        st.metric(
+            "⏱️ Tiempo Real (Ruta Corta)", f"{resultado['tiempo_real_total']:.1f} min"
+        )
+
+    st.divider()
+
+    # (El resto de la función para mostrar la tabla de la ruta no necesita cambios)
+    st.markdown("### 🛣️ Secuencia de la Ruta")
+    ruta_data = []
+    for i, (nombre, nodo_id) in enumerate(
+        zip(resultado["ruta_nombres"], resultado["ruta_nodos"])
+    ):
+        tipo = (
+            "🏁 Origen"
+            if i == 0
+            else "🎯 Destino"
+            if i == len(resultado["ruta_nombres"]) - 1
+            else "⏺️ Intermedio"
+        )
+        ruta_data.append({"Paso": i + 1, "Tipo": tipo, "Nombre": nombre, "ID": nodo_id})
+    st.dataframe(pd.DataFrame(ruta_data), use_container_width=True, hide_index=True)
 
 
 def mostrar_resultado_astar(resultado):
@@ -199,234 +230,129 @@ def mostrar_resultado_astar(resultado):
     if not resultado:
         st.warning("No se encontró una ruta con A*")
         return
-
-    with st.container():
-        st.subheader("📊 Resultado A* (Basado en Tiempo + Tráfico)")
-
-        col1, col2 = st.columns([1, 2])
-
-        with col1:
-            st.metric("Tiempo Estimado", f"{resultado['tiempo_total']:.2f} min")
-
-        with col2:
-            st.metric("Cantidad de Paradas", len(resultado["ruta_nodos"]))
-
-        st.write("**Secuencia de la Ruta:**")
-        for i, (nombre, nodo_id) in enumerate(
-            zip(resultado["ruta_nombres"], resultado["ruta_nodos"])
-        ):
-            st.write(f"{i + 1}. **{nombre}** ({nodo_id})")
+    st.subheader("📊 Resultado A* (Basado en Tiempo + Tráfico)")
+    cols = st.columns(4)
+    with cols[0]:
+        st.metric("⏱️ Tiempo Estimado", f"{resultado['tiempo_total']:.2f} min")
+    with cols[1]:
+        st.metric("📍 Paradas", len(resultado["ruta_nodos"]))
+    with cols[2]:
+        tiempo_por_parada = resultado["tiempo_total"] / max(
+            len(resultado["ruta_nodos"]), 1
+        )
+        st.metric("⏱️ Tiempo/Parada", f"{tiempo_por_parada:.1f} min")
+    with cols[3]:
+        dist_est = resultado["tiempo_total"] / 1.2
+        st.metric("📏 Distancia Estimada", f"{dist_est:.1f} km")
+    st.divider()
+    st.markdown("### 🛣️ Secuencia de la Ruta")
+    ruta_data = []
+    for i, (nombre, nodo_id) in enumerate(
+        zip(resultado["ruta_nombres"], resultado["ruta_nodos"])
+    ):
+        tipo = (
+            "🏁 Origen"
+            if i == 0
+            else "🎯 Destino"
+            if i == len(resultado["ruta_nombres"]) - 1
+            else "⏺️ Intermedio"
+        )
+        ruta_data.append({"Paso": i + 1, "Tipo": tipo, "Nombre": nombre, "ID": nodo_id})
+    st.dataframe(pd.DataFrame(ruta_data), use_container_width=True, hide_index=True)
 
 
 def mostrar_comparacion(dijkstra, astar):
-    """Muestra comparación entre ambos algoritmos de forma ordenada"""
-
+    """Muestra comparación entre ambos algoritmos"""
     if not dijkstra and not astar:
         st.warning("No se encontraron rutas con ninguno de los algoritmos")
         return
-
-    # Título de la sección
-    st.markdown("---")
+    st.divider()
     st.subheader("📊 Comparación de Algoritmos")
-
-    # Crear dos columnas para los algoritmos
-    col1, col2 = st.columns(2)
-
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.markdown("### 🟢 **Dijkstra**")
-        st.markdown("*Basado en distancia*")
-
         if dijkstra:
-            # Métricas principales
-            st.metric(
-                label="📏 Distancia Total",
-                value=f"{dijkstra['distancia_total']:.2f} km",
-            )
-
-            # Detalles de la ruta
-            with st.expander("🛣️ Ver ruta completa"):
-                for i, nombre in enumerate(dijkstra["ruta_nombres"], 1):
-                    st.markdown(f"{i}. **{nombre}**")
-
-            # Estadísticas adicionales
-            st.markdown("**📊 Estadísticas:**")
-            st.markdown(f"- 📍 **Paradas:** {len(dijkstra['ruta_nodos'])}")
-            st.markdown(
-                f"- ⚡ **Velocidad promedio:** {(dijkstra['distancia_total'] / len(dijkstra['ruta_nodos']) * 10):.1f} km/h"
-            )
-        else:
-            st.error("No se encontró ruta con Dijkstra")
-
+            st.metric("📏 Dijkstra Distancia", f"{dijkstra['distancia_total']:.1f} km")
     with col2:
-        st.markdown("### 🔵 **A***")
-        st.markdown("*Basado en tiempo + tráfico*")
-
+        if dijkstra:
+            st.metric("📍 Dijkstra Paradas", len(dijkstra["ruta_nodos"]))
+    with col3:
         if astar:
-            # Métricas principales
-            st.metric(
-                label="⏱️ Tiempo Estimado", value=f"{astar['tiempo_total']:.2f} min"
-            )
-
-            # Detalles de la ruta
-            with st.expander("🛣️ Ver ruta completa"):
+            st.metric("⏱️ A* Tiempo", f"{astar['tiempo_total']:.1f} min")
+    with col4:
+        if astar:
+            st.metric("📍 A* Paradas", len(astar["ruta_nodos"]))
+    st.divider()
+    if dijkstra or astar:
+        col_ruta1, col_ruta2 = st.columns(2)
+        with col_ruta1:
+            if dijkstra:
+                st.markdown("### 🟢 Ruta Dijkstra")
+                for i, nombre in enumerate(dijkstra["ruta_nombres"], 1):
+                    emoji = (
+                        "🏁"
+                        if i == 1
+                        else "🎯"
+                        if i == len(dijkstra["ruta_nombres"])
+                        else "⏺️"
+                    )
+                    st.markdown(f"{emoji} **{i}. {nombre}**")
+        with col_ruta2:
+            if astar:
+                st.markdown("### 🔵 Ruta A*")
                 for i, nombre in enumerate(astar["ruta_nombres"], 1):
-                    st.markdown(f"{i}. **{nombre}**")
-
-            # Estadísticas adicionales
-            st.markdown("**📊 Estadísticas:**")
-            st.markdown(f"- 📍 **Paradas:** {len(astar['ruta_nodos'])}")
-            st.markdown(
-                f"- 🚦 **Tráfico promedio:** {(astar.get('tiempo_total', 0) / len(astar['ruta_nodos']) / 5):.2f}"
-            )
-        else:
-            st.error("No se encontró ruta con A*")
-
-    # Análisis comparativo (solo si ambos algoritmos tienen resultados)
+                    emoji = (
+                        "🏁"
+                        if i == 1
+                        else "🎯"
+                        if i == len(astar["ruta_nombres"])
+                        else "⏺️"
+                    )
+                    st.markdown(f"{emoji} **{i}. {nombre}**")
     if dijkstra and astar:
-        st.markdown("---")
+        st.divider()
         st.subheader("📈 Análisis Comparativo")
-
-        # Calcular métricas comparativas
         distancia_dijkstra = dijkstra["distancia_total"]
         tiempo_astar = astar["tiempo_total"]
-
-        # Estimaciones para comparación
-        tiempo_estimado_dijkstra = distancia_dijkstra * 1.2  # 50 km/h = 1.2 min/km
+        tiempo_estimado_dijkstra = distancia_dijkstra * 1.2
         distancia_estimada_astar = tiempo_astar / 1.2
-
-        # Tarjetas de comparación
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            diferencia_dist = abs(distancia_dijkstra - distancia_estimada_astar)
-            st.metric(
-                label="📏 Diferencia en Distancia",
-                value=f"{diferencia_dist:.2f} km",
-                delta=f"{((diferencia_dist / distancia_dijkstra) * 100):.1f}%",
-            )
-
-        with col2:
-            diferencia_tiempo = abs(tiempo_astar - tiempo_estimado_dijkstra)
-            st.metric(
-                label="⏱️ Diferencia en Tiempo",
-                value=f"{diferencia_tiempo:.2f} min",
-                delta=f"{((diferencia_tiempo / tiempo_astar) * 100):.1f}%",
-            )
-
-        with col3:
-            # Calcular eficiencia (km por minuto)
-            eficiencia_dijkstra = distancia_dijkstra / tiempo_estimado_dijkstra * 60
-            eficiencia_astar = distancia_estimada_astar / tiempo_astar * 60
-            st.metric(
-                label="⚡ Eficiencia Promedio",
-                value=f"{((eficiencia_dijkstra + eficiencia_astar) / 2):.1f} km/h",
-            )
-
-        # Tabla comparativa detallada
-        st.markdown("---")
-        st.subheader("📋 Tabla Comparativa Detallada")
-
-        # Crear DataFrame para la tabla
-        comparacion_df = pd.DataFrame(
+        df_comp = pd.DataFrame(
             {
-                "Métrica": [
-                    "Distancia (km)",
-                    "Tiempo estimado (min)",
-                    "Número de paradas",
-                    "Velocidad promedio (km/h)",
-                ],
-                "Dijkstra": [
-                    f"{distancia_dijkstra:.2f}",
-                    f"{tiempo_estimado_dijkstra:.2f}",
-                    f"{len(dijkstra['ruta_nodos'])}",
-                    f"{distancia_dijkstra / tiempo_estimado_dijkstra * 60:.1f}",
-                ],
-                "A*": [
-                    f"{distancia_estimada_astar:.2f}",
-                    f"{tiempo_astar:.2f}",
-                    f"{len(astar['ruta_nodos'])}",
-                    f"{distancia_estimada_astar / tiempo_astar * 60:.1f}",
+                "Algoritmo": ["Dijkstra", "A*", "Dijkstra", "A*"],
+                "Métrica": ["Distancia (km)"] * 2 + ["Tiempo (min)"] * 2,
+                "Valor": [
+                    distancia_dijkstra,
+                    distancia_estimada_astar,
+                    tiempo_estimado_dijkstra,
+                    tiempo_astar,
                 ],
             }
         )
-
-        # Mostrar tabla estilizada
-        st.dataframe(
-            comparacion_df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Métrica": st.column_config.TextColumn("Métrica", width="medium"),
-                "Dijkstra": st.column_config.TextColumn("Dijkstra", width="small"),
-                "A*": st.column_config.TextColumn("A*", width="small"),
-            },
-        )
-
-        # Gráfico de barras comparativo
-        st.markdown("---")
-        st.subheader("📊 Visualización Comparativa")
-
-        # Preparar datos para el gráfico
-        metricas = ["Distancia (km)", "Tiempo (min)"]
-        valores_dijkstra = [distancia_dijkstra, tiempo_estimado_dijkstra]
-        valores_astar = [distancia_estimada_astar, tiempo_astar]
-
-        fig = go.Figure(
-            data=[
-                go.Bar(
-                    name="Dijkstra",
-                    x=metricas,
-                    y=valores_dijkstra,
-                    marker_color="#2ECC71",
-                    text=valores_dijkstra,
-                    textposition="auto",
-                ),
-                go.Bar(
-                    name="A*",
-                    x=metricas,
-                    y=valores_astar,
-                    marker_color="#3498DB",
-                    text=valores_astar,
-                    textposition="auto",
-                ),
-            ]
-        )
-
-        fig.update_layout(
-            title="Comparación de Métricas por Algoritmo",
-            xaxis_title="Métrica",
-            yaxis_title="Valor",
+        fig = px.bar(
+            df_comp,
+            x="Métrica",
+            y="Valor",
+            color="Algoritmo",
             barmode="group",
+            color_discrete_map={"Dijkstra": "#2ECC71", "A*": "#3498DB"},
+            text_auto=".1f",
+        )
+        fig.update_layout(
             height=400,
             showlegend=True,
             legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+                orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5
             ),
         )
-
         st.plotly_chart(fig, use_container_width=True)
-
-        # Recomendación basada en los resultados
-        st.markdown("---")
+        st.divider()
         st.subheader("🎯 Recomendación")
-
-        if (
-            distancia_dijkstra < distancia_estimada_astar * 0.9
-        ):  # Dijkstra es 10% mejor en distancia
-            st.success("""
-            ✅ **Dijkstra** ofrece la ruta más corta en términos de distancia.
-
-            *Recomendado cuando:* El costo de combustible es la principal preocupación.
-            """)
-        elif tiempo_astar < tiempo_estimado_dijkstra * 0.9:  # A* es 10% mejor en tiempo
-            st.success("""
-            ✅ **A*** ofrece el mejor tiempo de viaje considerando tráfico.
-
-            *Recomendado cuando:* La puntualidad en las entregas es prioritaria.
-            """)
+        diff_dist = abs(distancia_dijkstra - distancia_estimada_astar)
+        diff_tiempo = abs(tiempo_estimado_dijkstra - tiempo_astar)
+        if diff_dist < 1 and diff_tiempo < 1:
+            st.info(
+                f"**⚖️ Rutas equivalentes** | Diferencia: {diff_dist:.2f} km, {diff_tiempo:.2f} min"
+            )
+        elif distancia_dijkstra < distancia_estimada_astar:
+            st.success(f"**✅ Dijkstra** | Ahorra {diff_dist:.2f} km en distancia")
         else:
-            st.info("""
-            ⚖️ **Ambos algoritmos** ofrecen rutas similares.
-
-            *Puede elegir cualquiera basado en preferencias operativas.*
-            """)
+            st.success(f"**✅ A*** | Ahorra {diff_tiempo:.2f} min en tiempo")

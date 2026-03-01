@@ -2,9 +2,15 @@ import os
 
 import streamlit as st
 
-from components.algoritmos import ejecutar_algoritmos
+# --- MODIFICADO: Importar las funciones de cálculo Y de visualización ---
+from components.algoritmos import (
+    ejecutar_algoritmos,
+    mostrar_comparacion,
+    mostrar_resultado_astar,
+    mostrar_resultado_dijkstra,
+)
 
-# Importar componentes
+# Importar otros componentes
 from components.conexion import init_connection, test_connection
 from components.consultas import render_consultas
 from components.metricas import render_metricas
@@ -18,7 +24,23 @@ def load_css():
         with open(css_file) as f:
             st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
     else:
-        st.warning("Archivo de estilos no encontrado")
+        # CSS de respaldo
+        st.markdown(
+            """
+        <style>
+            .main .block-container {
+                max-width: 100% !important;
+                padding-left: 2rem !important;
+                padding-right: 2rem !important;
+            }
+            .st-emotion-cache-4j9vvg, .st-emotion-cache-keje6w {
+                max-width: 100% !important;
+                width: 100% !important;
+            }
+        </style>
+        """,
+            unsafe_allow_html=True,
+        )
 
 
 # Configuración de la página
@@ -26,8 +48,7 @@ st.set_page_config(
     page_title="Logistics Optimizer - Smart Routing", page_icon="🚚", layout="wide"
 )
 
-
-# load_css()
+load_css()
 # Título principal
 st.title("🚚 Logistics Optimizer - Smart Routing Dashboard")
 st.markdown("---")
@@ -53,11 +74,14 @@ render_metricas(conn)
 
 st.markdown("---")
 
-# Estado para mantener la ruta actual
+# --- MODIFICADO: Añadido 'resultados_calculados' para guardar los datos ---
 if "ruta_actual" not in st.session_state:
     st.session_state.ruta_actual = None
 if "ultima_busqueda" not in st.session_state:
     st.session_state.ultima_busqueda = None
+if "resultados_calculados" not in st.session_state:
+    st.session_state.resultados_calculados = None
+
 
 # Sección de algoritmos
 st.header("🛣️ Optimización de Rutas")
@@ -73,12 +97,12 @@ with col2:
     st.markdown(f"**Capacidad:** {capacidad} ton")
 
 with col3:
+    # --- MODIFICADO: El botón ahora solo calcula y guarda los resultados ---
     if st.button("🚀 Calcular Ruta Óptima", type="primary", use_container_width=True):
         with st.spinner("Calculando rutas..."):
             origen_id = location_options[origen]
             destino_id = location_options[destino]
 
-            # Guardar parámetros de búsqueda
             st.session_state.ultima_busqueda = {
                 "origen": origen,
                 "destino": destino,
@@ -86,15 +110,36 @@ with col3:
                 "capacidad": capacidad,
             }
 
-            # Ejecutar algoritmos y guardar resultado
-            st.session_state.ruta_actual = ejecutar_algoritmos(
+            # La función ahora devuelve la ruta para el mapa y los datos para mostrar
+            ruta_mapa, resultados_display = ejecutar_algoritmos(
                 conn, origen_id, destino_id, algoritmo, capacidad
             )
+            st.session_state.ruta_actual = ruta_mapa
+            st.session_state.resultados_calculados = resultados_display
+
+# --- NUEVA SECCIÓN: Mostrar los resultados a todo lo ancho ---
+# Esta sección se encuentra fuera de las columnas, por lo que usará todo el espacio.
+if st.session_state.resultados_calculados:
+    algo_usado = st.session_state.ultima_busqueda["algoritmo"]
+    resultados = st.session_state.resultados_calculados
+
+    if algo_usado == "Dijkstra (Distancia)":
+        mostrar_resultado_dijkstra(resultados.get("dijkstra"))
+
+    elif algo_usado == "A* (Tiempo + Tráfico)":
+        mostrar_resultado_astar(resultados.get("astar"))
+
+    else:  # Comparar ambos
+        mostrar_comparacion(resultados.get("dijkstra"), resultados.get("astar"))
+
 
 # Mostrar información de la última búsqueda si existe
 if st.session_state.ultima_busqueda:
     st.info(
-        f"📌 Mostrando última ruta calculada: {st.session_state.ultima_busqueda['origen']} → {st.session_state.ultima_busqueda['destino']} ({st.session_state.ultima_busqueda['algoritmo']})"
+        f"📌 **Mostrando última ruta calculada:** "
+        f"{st.session_state.ultima_busqueda['origen']} → "
+        f"{st.session_state.ultima_busqueda['destino']} "
+        f"({st.session_state.ultima_busqueda['algoritmo']})"
     )
 
 st.markdown("---")
@@ -105,14 +150,10 @@ render_grafo(conn, st.session_state.ruta_actual)
 # Renderizar consultas complejas
 render_consultas(conn)
 
-# Botón para limpiar la ruta destacada
+# --- MODIFICADO: El botón de limpiar ahora resetea también los resultados ---
 if st.session_state.ruta_actual:
     if st.button("🧹 Limpiar ruta destacada", use_container_width=True):
         st.session_state.ruta_actual = None
         st.session_state.ultima_busqueda = None
+        st.session_state.resultados_calculados = None  # <-- Añadido
         st.rerun()
-
-# Pie de página
-st.markdown("---")
-st.markdown("© 2025 - Proyecto III: Logistics Optimizer (Smart Routing)")
-st.markdown("Sistemas de Bases de Datos II - UNEG")

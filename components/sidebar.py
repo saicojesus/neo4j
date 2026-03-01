@@ -49,11 +49,6 @@ def render_sidebar(conn):
             ["Dijkstra (Distancia)", "A* (Tiempo + Tráfico)", "Comparar ambos"],
             key="algoritmo_radio",
         )
-
-        st.markdown("---")
-        st.markdown("**Proyecto III - Sistemas BD II**")
-        st.markdown("Prof. Clinia Cordero")
-
         return origen, destino, capacidad, algoritmo, location_options
 
 
