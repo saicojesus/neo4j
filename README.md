@@ -1,8 +1,7 @@
-```markdown
+
 # 🚚 Logistics Optimizer - Smart Routing Dashboard
 
 Este proyecto es una plataforma de optimización logística basada en **Grafos (Neo4j)** y **Streamlit**. Permite calcular rutas óptimas para vehículos de carga pesada, integrando restricciones físicas de las vías en tiempo real y comparando algoritmos de búsqueda de caminos.
-
 ## 🚀 Características Principales
 
 - **Optimización de Rutas:** Implementación de algoritmos Dijkstra (Distancia mínima) y A* (Tiempo mínimo con tráfico).
@@ -67,4 +66,3 @@ El sistema implementa un filtrado en tiempo real mediante **Proyecciones Cypher 
 - `app.py`: Punto de entrada de la interfaz Streamlit.
 - `compose.yml`: Configuración de infraestructura contenerizada.
 - `plugins/`: Carpeta para extensiones de Neo4j (.gitignore activo para evitar binarios pesados).
-```
