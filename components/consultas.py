@@ -107,12 +107,17 @@ def consulta_rutas_criticas(conn):
 
     query = """
     MATCH (n1)-[r:CONECTA_A]->(n2)
-    RETURN n1.id as origen, n2.id as destino,
+    // Usamos WITH para calcular un factor de criticidad matemático
+    WITH n1, n2, r,
+         (r.distancia * (1 + r.estado_trafico)) AS score_critico
+    ORDER BY score_critico DESC
+    LIMIT 10
+    RETURN n1.id as origen,
+           n2.id as destino,
            r.distancia as distancia,
            r.estado_trafico as trafico,
-           r.tiempo_estimado as tiempo
-    ORDER BY r.distancia DESC
-    LIMIT 10
+           r.tiempo_estimado as tiempo,
+           round(score_critico, 2) as criticidad
     """
 
     try:
@@ -147,9 +152,15 @@ def consulta_capacidad(conn):
     query = f"""
     MATCH (n1)-[r:CONECTA_A]->(n2)
     WHERE r.capacidad_max_ton >= {capacidad_filter}
-    RETURN r.capacidad_max_ton as capacidad,
-           count(*) as cantidad,
-           avg(r.distancia) as distancia_promedio
+    // Usamos WITH para agrupar y recolectar datos de los nodos
+    WITH r.capacidad_max_ton as capacidad,
+         collect(n1.id + '->' + n2.id) as rutas_ejemplo,
+         count(*) as cantidad,
+         avg(r.distancia) as distancia_promedio
+    RETURN capacidad,
+           cantidad,
+           round(distancia_promedio, 2) as distancia_promedio,
+           rutas_ejemplo[0..3] as ejemplos // Mostramos solo 3 ejemplos por capacidad
     ORDER BY capacidad
     """
 
@@ -229,15 +240,22 @@ def consulta_demanda(conn):
     st.subheader("Distribución de Demanda por Cliente")
 
     query = """
-    MATCH (p:PuntoEntrega)
-    RETURN p.nombre as cliente,
-           p.demanda as demanda,
-           p.prioridad as prioridad,
-           p.x as x,
-           p.y as y
-    ORDER BY p.demanda DESC
-    LIMIT 15
-    """
+     MATCH (p:PuntoEntrega)
+     // Agrupamos por prioridad usando WITH para sacar métricas globales
+     WITH p.prioridad as prioridad,
+          sum(p.demanda) as demanda_total_prioridad,
+          collect(p) as clientes
+     // Desdoblamos la lista de clientes usando UNWIND (Cumpliendo el requisito)
+     UNWIND clientes as cliente
+     RETURN cliente.nombre as cliente,
+            cliente.demanda as demanda,
+            prioridad,
+            demanda_total_prioridad,
+            cliente.x as x,
+            cliente.y as y
+     ORDER BY cliente.demanda DESC
+     LIMIT 15
+     """
 
     try:
         result = conn.query(query)
