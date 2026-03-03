@@ -145,7 +145,7 @@ if st.session_state.ultima_busqueda:
 st.markdown("---")
 
 # Renderizar visualización del grafo con la ruta actual
-render_grafo(conn, st.session_state.ruta_actual)
+render_grafo(conn, st.session_state.ruta_actual, capacidad=capacidad)
 
 # Renderizar consultas complejas
 render_consultas(conn)

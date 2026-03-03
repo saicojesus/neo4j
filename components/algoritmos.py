@@ -4,11 +4,11 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
-# --- MODIFICADO: La función ahora no muestra nada, solo calcula y devuelve los datos ---
 def ejecutar_algoritmos(conn, origen_id, destino_id, algoritmo, capacidad):
     """Ejecuta los algoritmos de ruteo seleccionados y devuelve los resultados."""
 
-    if not crear_proyeccion(conn):
+    # Le pasamos la 'capacidad' para que filtre desde la base
+    if not crear_proyeccion(conn, capacidad):
         st.error("No se pudo crear la proyección del grafo")
         return None, None
 
@@ -32,7 +32,7 @@ def ejecutar_algoritmos(conn, origen_id, destino_id, algoritmo, capacidad):
             resultados_para_display["dijkstra"] = res_dijkstra
             resultados_para_display["astar"] = res_astar
 
-            # Lógica para decidir qué ruta resaltar en el mapa (sin cambios)
+            # Lógica para decidir qué ruta resaltar en el mapa
             if res_dijkstra and res_astar:
                 if (
                     res_dijkstra["distancia_total"]
@@ -50,12 +50,11 @@ def ejecutar_algoritmos(conn, origen_id, destino_id, algoritmo, capacidad):
         # Limpiar proyección
         limpiar_proyeccion(conn)
 
-    # Devuelve la ruta para pintar en el mapa y todos los datos para mostrar en la UI
     return ruta_para_mapa, resultados_para_display
 
 
-def crear_proyeccion(conn):
-    """Crea la proyección del grafo en memoria con todas las propiedades necesarias"""
+def crear_proyeccion(conn, capacidad):
+    """Crea la proyección del grafo en memoria filtrando por capacidad de carga permitida"""
     try:
         # Primero intentamos eliminar la proyección si existe
         try:
@@ -63,23 +62,21 @@ def crear_proyeccion(conn):
         except:
             pass  # Ignorar si no existe
 
-        # Crear nueva proyección
-        conn.query("""
-            CALL gds.graph.project(
+        # Usamos gds.graph.project.cypher para permitir consultas (MATCH/WHERE)
+        query = f"""
+            CALL gds.graph.project.cypher(
                 'myGraph',
-                {
-                    Almacen: { label: 'Almacen', properties: ['x', 'y'] },
-                    Interseccion: { label: 'Interseccion', properties: ['x', 'y'] },
-                    PuntoEntrega: { label: 'PuntoEntrega', properties: ['x', 'y'] }
-                },
-                {
-                    CONECTA_A: {
-                        orientation: 'NATURAL',
-                        properties: ['peso_distancia', 'peso_tiempo', 'capacidad_max_ton', 'distancia', 'estado_trafico']
-                    }
-                }
+                'MATCH (n) WHERE n:Almacen OR n:Interseccion OR n:PuntoEntrega
+                 RETURN id(n) AS id, coalesce(n.x, 0.0) AS x, coalesce(n.y, 0.0) AS y',
+
+                'MATCH (n)-[r:CONECTA_A]->(m)
+                 WHERE r.capacidad_max_ton >= {capacidad}
+                 RETURN id(n) AS source, id(m) AS target,
+                        coalesce(r.peso_distancia, 0.0) AS peso_distancia,
+                        coalesce(r.peso_tiempo, 0.0) AS peso_tiempo'
             )
-        """)
+        """
+        conn.query(query)
         return True
     except Exception as e:
         st.error(f"Error creando proyección: {e}")
@@ -89,7 +86,7 @@ def crear_proyeccion(conn):
 def ejecutar_dijkstra(conn, origen_id, destino_id):
     """
     Ejecuta Dijkstra para encontrar la ruta más CORTA en distancia
-    y ADEMÁS calcula el tiempo REAL de esa ruta.
+    y ADEMÁS calcula el tiempo REAL de esa ruta buscando en la BD original.
     """
     query = """
     MATCH (source {id: $origen}), (target {id: $destino})
@@ -100,18 +97,21 @@ def ejecutar_dijkstra(conn, origen_id, destino_id):
     })
     YIELD index, sourceNode, targetNode, totalCost, nodeIds, costs, path
     RETURN
-        // 1. La distancia total (basada en 'peso_distancia')
         totalCost as distancia_total,
 
-        // 2. <-- NUEVA LÍNEA: Calculamos el tiempo real de la ruta encontrada
-        // Usamos REDUCE para sumar el 'peso_tiempo' de cada relación en el camino
-        REDUCE(tiempoTotal = 0.0, rel IN relationships(path) | tiempoTotal + rel.peso_tiempo) AS tiempo_real_total,
-
-        // 3. El resto de los datos que ya tenías
-        [nodeId IN nodeIds | gds.util.asNode(nodeId).id] as ruta_nodos,
-        [nodeId IN nodeIds | gds.util.asNode(nodeId).nombre] as ruta_nombres,
-        [nodeId IN nodeIds | gds.util.asNode(nodeId).x] as coordenadas_x,
-        [nodeId IN nodeIds | gds.util.asNode(nodeId).y] as coordenadas_y
+        // <-- CORRECCIÓN: Sintaxis válida de Cypher para buscar las relaciones reales
+        CASE WHEN size(nodeIds) > 1 THEN
+            reduce(acc = 0.0, i in range(0, size(nodeIds)-2) |
+                acc + coalesce(
+                    head(
+                        [ (n)-[r:CONECTA_A]->(m)
+                          WHERE id(n) = nodeIds[i] AND id(m) = nodeIds[i+1]
+                          | r.peso_tiempo ]
+                    ), 0.0
+                )
+            )
+        ELSE 0.0 END AS tiempo_real_total,[nodeId IN nodeIds | gds.util.asNode(nodeId).id] as ruta_nodos,[nodeId IN nodeIds | gds.util.asNode(nodeId).nombre] as ruta_nombres,
+        [nodeId IN nodeIds | gds.util.asNode(nodeId).x] as coordenadas_x,[nodeId IN nodeIds | gds.util.asNode(nodeId).y] as coordenadas_y
     """
 
     try:
@@ -188,23 +188,18 @@ def mostrar_resultado_dijkstra(resultado):
     with cols[1]:
         st.metric("📍 Paradas", len(resultado["ruta_nodos"]))
 
-    # --- MODIFICADO: Usar el tiempo real para calcular la velocidad promedio ---
-    # Esto dará una velocidad mucho más realista
     with cols[2]:
-        tiempo_en_horas = resultado["tiempo_real_total"] / 60
+        # Obtenemos el tiempo real de manera segura (si es None, usa 0.0)
+        tiempo_real = resultado.get("tiempo_real_total") or 0.0
+        tiempo_en_horas = tiempo_real / 60
         velocidad = (
             resultado["distancia_total"]
             / max(tiempo_en_horas, 0.01)  # Evitar división por cero
         )
         st.metric("⚡ Velocidad Promedio", f"{velocidad:.1f} km/h")
 
-    # --- MODIFICADO: Mostrar el tiempo real en lugar del estimado ---
     with cols[3]:
-        # Ya no hacemos: tiempo_est = resultado["distancia_total"] * 1.2
-        # Ahora usamos el valor real de la consulta:
-        st.metric(
-            "⏱️ Tiempo Real (Ruta Corta)", f"{resultado['tiempo_real_total']:.1f} min"
-        )
+        st.metric("⏱️ Tiempo Real (Ruta Corta)", f"{tiempo_real:.1f} min")
 
     st.divider()
 
